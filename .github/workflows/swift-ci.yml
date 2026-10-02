@@ -1,0 +1,45 @@
+name: Swift CI
+
+# Reusable CI for Swift packages/apps targeting Apple platforms. swift build
+# and swift test need an actual Xcode toolchain (SwiftUI, UIKit, etc. don't
+# exist on Linux), so this always runs on a self-hosted macOS runner, not a
+# GitHub-hosted one - matching the same per-repo runner convention documented
+# in dryan/infrastructure's github-actions-runner-hofn.md.
+#
+# Call it from a repo with .github/workflows/ci.yml:
+#
+#   name: CI
+#   on:
+#     pull_request:
+#     push: { branches: [main] }
+#   jobs:
+#     ci:
+#       uses: dryan-org/reusable-workflows/.github/workflows/swift-ci.yml@v1
+
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        type: string
+        # A JSON array string, e.g. '["self-hosted","macOS","xcode27"]'. The
+        # calling repo needs its own self-hosted runner carrying these
+        # labels; see "Adding a runner for a new repo" in
+        # github-actions-runner-hofn.md.
+        default: '["self-hosted","macOS","xcode27"]'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ fromJSON(inputs.runs-on) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: swift build
+        shell: bash
+        run: swift build
+
+      - name: swift test
+        shell: bash
+        run: swift test
