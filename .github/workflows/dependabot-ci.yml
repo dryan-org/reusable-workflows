@@ -23,6 +23,8 @@ name: Dependency CI
 #       # then just pass the token through:
 #       # secrets:
 #       #   npm_token: ${{ secrets.NPM_TOKEN }}
+#       #   # and, for GitHub Packages, a ${GITHUB_PACKAGES_TOKEN} expansion:
+#       #   github_packages_token: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
 
 on:
   workflow_call:
@@ -38,6 +40,12 @@ on:
       npm_token:
         # exposed as NPM_TOKEN for npm ci/install to consume via a checked-in
         # .npmrc's ${NPM_TOKEN} expansion (private/scoped registries)
+        required: false
+      github_packages_token:
+        # exposed as GITHUB_PACKAGES_TOKEN, the same way, for a second
+        # registry: GitHub Packages (npm.pkg.github.com), which takes a classic
+        # token with read:packages. Separate from npm_token so a repo can use
+        # both (Font Awesome Pro and a private @org package, say)
         required: false
 
 permissions:
@@ -112,6 +120,7 @@ jobs:
         if: steps.d.outputs.npm == 'true'
         env:
           NPM_TOKEN: ${{ secrets.npm_token }}
+          GITHUB_PACKAGES_TOKEN: ${{ secrets.github_packages_token }}
         shell: bash
         run: |
           set -euo pipefail
