@@ -26,7 +26,7 @@ on:
     branches: [main, master]
 jobs:
   ci:
-    uses: dryan/reusable-workflows/.github/workflows/dependabot-ci.yml@v1
+    uses: dryan-org/reusable-workflows/.github/workflows/dependabot-ci.yml@v1
 ```
 
 The status check appears as **`ci / build`**. Pin the ruleset's required check
