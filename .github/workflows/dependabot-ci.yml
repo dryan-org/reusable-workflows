@@ -15,7 +15,7 @@ name: Dependency CI
 #     push: { branches: [main, master] }
 #   jobs:
 #     ci:
-#       uses: dryan/reusable-workflows/.github/workflows/dependabot-ci.yml@v1
+#       uses: dryan-org/reusable-workflows/.github/workflows/dependabot-ci.yml@v1
 #       # optional, for a private/scoped npm registry: commit an .npmrc with
 #       # the registry mapping(s) and an ${NPM_TOKEN} expansion (npm expands
 #       # env vars in .npmrc itself - see
