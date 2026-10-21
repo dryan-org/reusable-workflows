@@ -279,6 +279,6 @@ jobs:
           PEDANTRY_VERSION: ${{ steps.pedantry.outputs.version }}
         run: |
           set -euo pipefail
-          # system interpreter only: uvx would otherwise download the newest
-          # CPython, which the language steps above must not be able to see
-          uvx --python-preference only-system --from "git+https://github.com/dryan-org/pedantry@v${PEDANTRY_VERSION}" pedantry check --diff
+          # runs last, so the Python uvx downloads for pedantry (3.14+, newer
+          # than the runner's) can no longer leak into the language steps
+          uvx --from "git+https://github.com/dryan-org/pedantry@v${PEDANTRY_VERSION}" pedantry check --diff
