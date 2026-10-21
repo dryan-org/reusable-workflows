@@ -56,9 +56,6 @@ work from a repo in any org. The key reaches only the token step, never build
 or test code. Checkout runs with `persist-credentials: false` so its
 `GITHUB_TOKEN` header does not override the App token.
 
-The `ssh_key` secret (ssh-agent with a deploy key) is **deprecated** and will
-be removed.
-
 ### Repo setup hook
 
 If the repo has `.github/actions/ci-setup/action.yml`, it runs after checkout
