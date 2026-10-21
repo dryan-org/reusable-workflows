@@ -51,11 +51,6 @@ on:
         # private key of the read-only dryan-ci-read GitHub App; lets
         # `uv sync` / `npm ci` / cargo / submodules reach private dryan-org repos
         required: false
-      ssh_key:
-        # DEPRECATED: use ci_read_app_key instead. Private key for an ssh-agent - lets `uv sync` / `npm ci`
-        # reach private git dependencies (add the matching deploy key to that
-        # repo). Only dryan-org/infrastructure still uses it; to be removed.
-        required: false
       npm_token:
         # exposed as NPM_TOKEN for npm ci/install to consume via a checked-in
         # .npmrc's ${NPM_TOKEN} expansion (private/scoped registries)
@@ -110,14 +105,6 @@ jobs:
           for from in git@github.com:dryan-org/ ssh://git@github.com/dryan-org/ https://github.com/dryan-org/; do
             git config --global --add "url.${base}.insteadOf" "$from"
           done
-
-      - name: SSH key for private git deps
-        env:
-          SSH_KEY: ${{ secrets.ssh_key }}
-        if: env.SSH_KEY != ''
-        uses: webfactory/ssh-agent@v0.9.1
-        with:
-          ssh-private-key: ${{ secrets.ssh_key }}
 
       - name: Find repo setup action
         id: setup
