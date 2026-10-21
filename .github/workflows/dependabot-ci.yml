@@ -27,6 +27,10 @@ name: Dependency CI
 # pass it as ci_read_app_key. The workflow mints a read-only token and routes
 # every dryan-org git URL through it. Works from any org.
 #
+# A repo that pins pedantry (`[tool.pedantry] version` in pyproject.toml, or
+# `version` in pedantry.toml) gets `pedantry check` at that version, which fails
+# the job when managed files drift. No pin, no step.
+#
 # Per-repo setup: if the caller has .github/actions/ci-setup/action.yml, it runs
 # after checkout and before submodule init. Composite actions cannot read
 # secrets, so the secrets this workflow received are passed in as the JSON
@@ -153,6 +157,37 @@ jobs:
             fi
           done < <(find . -name .npmrc -not -path '*/node_modules/*' -print0)
           exit "$bad"
+
+      - name: Find pedantry pin
+        id: pedantry
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=""
+          for f in pyproject.toml pedantry.toml; do
+            [ -f "$f" ] || continue
+            version="$(python3 -c '
+          import sys, tomllib
+          with open(sys.argv[1], "rb") as fh:
+              data = tomllib.load(fh)
+          table = data.get("tool", {}).get("pedantry", {}) if sys.argv[1] == "pyproject.toml" else data
+          print(table.get("version", ""))
+          ' "$f")"
+            [ -n "$version" ] && break
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - if: steps.pedantry.outputs.version != ''
+        uses: astral-sh/setup-uv@v5
+
+      - name: pedantry check
+        if: steps.pedantry.outputs.version != ''
+        shell: bash
+        env:
+          PEDANTRY_VERSION: ${{ steps.pedantry.outputs.version }}
+        run: |
+          set -euo pipefail
+          uvx --from "git+https://github.com/dryan-org/pedantry@v${PEDANTRY_VERSION}" pedantry check --diff
 
       - name: Detect ecosystems
         id: d
