@@ -16,15 +16,29 @@ name: Dependency CI
 #   jobs:
 #     ci:
 #       uses: dryan-org/reusable-workflows/.github/workflows/dependabot-ci.yml@v1
-#       # optional, for a private/scoped npm registry: commit an .npmrc with
-#       # the registry mapping(s) and an ${NPM_TOKEN} expansion (npm expands
-#       # env vars in .npmrc itself - see
-#       # https://developers.cloudflare.com/pages/how-to/npm-private-registry/),
-#       # then just pass the token through:
-#       # secrets:
-#       #   npm_token: ${{ secrets.NPM_TOKEN }}
-#       #   # and, for GitHub Packages, a ${GITHUB_PACKAGES_TOKEN} expansion:
-#       #   github_packages_token: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
+#       # only for repos that need them:
+#       secrets:
+#         ci_read_app_key: ${{ secrets.CI_READ_APP_KEY }}
+#         npm_token: ${{ secrets.NPM_TOKEN }}
+#         github_packages_token: ${{ secrets.GITHUB_PACKAGES_TOKEN }}
+#
+# Private dryan-org git dependencies and submodules: give the repo the secret
+# CI_READ_APP_KEY (private key of the read-only dryan-ci-read GitHub App) and
+# pass it as ci_read_app_key. The workflow mints a read-only token and routes
+# every dryan-org git URL through it. Works from any org.
+#
+# Per-repo setup: if the caller has .github/actions/ci-setup/action.yml, it runs
+# after checkout and before submodule init. Composite actions cannot read
+# secrets, so the secrets this workflow received are passed in as the JSON
+# input `secrets` (read one with fromJSON(inputs.secrets).NAME). Callers in
+# dryan-org can use `secrets: inherit` to hand over all of theirs.
+#
+# For a private/scoped npm registry: commit an .npmrc with the registry
+# mapping(s) and an ${NPM_TOKEN} expansion (npm expands env vars in .npmrc
+# itself - see
+# https://developers.cloudflare.com/pages/how-to/npm-private-registry/), then
+# pass npm_token. GitHub Packages works the same way with
+# github_packages_token.
 
 on:
   workflow_call:
@@ -33,9 +47,14 @@ on:
         type: string
         default: "lts/*"
     secrets:
+      ci_read_app_key:
+        # private key of the read-only dryan-ci-read GitHub App; lets
+        # `uv sync` / `npm ci` / cargo / submodules reach private dryan-org repos
+        required: false
       ssh_key:
-        # private key for an ssh-agent - lets `uv sync` / `npm ci` reach
-        # private git dependencies (add the matching deploy key to that repo)
+        # DEPRECATED: use ci_read_app_key instead. Private key for an ssh-agent - lets `uv sync` / `npm ci`
+        # reach private git dependencies (add the matching deploy key to that
+        # repo). Only dryan-org/infrastructure still uses it; to be removed.
         required: false
       npm_token:
         # exposed as NPM_TOKEN for npm ci/install to consume via a checked-in
@@ -54,8 +73,43 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # make cargo fetch git deps with the git CLI so insteadOf rules apply
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - uses: actions/checkout@v4
+        with:
+          # checkout would persist GITHUB_TOKEN as an http.extraheader for
+          # all of github.com, which overrides the App token in the URL
+          # userinfo and breaks cross-repo reads. Nothing here pushes.
+          persist-credentials: false
+
+      # the key goes to this step only, never into job env where build and
+      # test code could read it
+      - name: App token for private dryan-org git deps
+        id: app
+        env:
+          CI_READ_APP_KEY: ${{ secrets.ci_read_app_key }}
+        if: env.CI_READ_APP_KEY != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          # dryan-ci-read's client id (not a secret)
+          client-id: Iv23lippni8ePmlvBfpQ
+          private-key: ${{ secrets.ci_read_app_key }}
+          owner: dryan-org
+          permission-contents: read
+
+      - name: Route dryan-org git URLs through the App token
+        if: steps.app.outputs.token != ''
+        env:
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://x-access-token:${APP_TOKEN}@github.com/dryan-org/"
+          for from in git@github.com:dryan-org/ ssh://git@github.com/dryan-org/ https://github.com/dryan-org/; do
+            git config --global --add "url.${base}.insteadOf" "$from"
+          done
 
       - name: SSH key for private git deps
         env:
@@ -64,6 +118,24 @@ jobs:
         uses: webfactory/ssh-agent@v0.9.1
         with:
           ssh-private-key: ${{ secrets.ssh_key }}
+
+      - name: Find repo setup action
+        id: setup
+        shell: bash
+        run: |
+          found=false
+          for f in .github/actions/ci-setup/action.yml .github/actions/ci-setup/action.yaml; do
+            [ -f "$f" ] && found=true
+          done
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+
+      - name: Repo setup (.github/actions/ci-setup)
+        if: steps.setup.outputs.found == 'true'
+        uses: ./.github/actions/ci-setup
+        with:
+          # composite actions cannot read secrets; this is every received
+          # secret as JSON, read one with fromJSON(inputs.secrets).NAME
+          secrets: ${{ toJSON(secrets) }}
 
       - name: Init submodules (best effort - e.g. .pedantry shared configs)
         shell: bash
