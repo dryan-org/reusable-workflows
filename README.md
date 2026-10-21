@@ -56,6 +56,15 @@ work from a repo in any org. The key reaches only the token step, never build
 or test code. Checkout runs with `persist-credentials: false` so its
 `GITHUB_TOKEN` header does not override the App token.
 
+### Pedantry check
+
+If the repo pins [pedantry](https://github.com/dryan-org/pedantry) (`version`
+under `[tool.pedantry]` in `pyproject.toml`, or `version` in `pedantry.toml`),
+the job runs `pedantry check --diff` at that version, via `uvx` from GitHub,
+after setup and before the language steps. It fails when a managed file drifted
+from what `pedantry sync` would write. Repos without a pin skip the step
+silently.
+
 ### Repo setup hook
 
 If the repo has `.github/actions/ci-setup/action.yml`, it runs after checkout
