@@ -29,7 +29,8 @@ name: Dependency CI
 #
 # A repo that pins pedantry (`[tool.pedantry] version` in pyproject.toml, or
 # `version` in pedantry.toml) gets `pedantry check` at that version, which fails
-# the job when managed files drift. No pin, no step.
+# the job when managed files drift. No pin, no step. It runs last, with the
+# system Python only, so it cannot change which interpreter the language steps use.
 #
 # Per-repo setup: if the caller has .github/actions/ci-setup/action.yml, it runs
 # after checkout and before submodule init. Composite actions cannot read
@@ -158,37 +159,6 @@ jobs:
           done < <(find . -name .npmrc -not -path '*/node_modules/*' -print0)
           exit "$bad"
 
-      - name: Find pedantry pin
-        id: pedantry
-        shell: bash
-        run: |
-          set -euo pipefail
-          version=""
-          for f in pyproject.toml pedantry.toml; do
-            [ -f "$f" ] || continue
-            version="$(python3 -c '
-          import sys, tomllib
-          with open(sys.argv[1], "rb") as fh:
-              data = tomllib.load(fh)
-          table = data.get("tool", {}).get("pedantry", {}) if sys.argv[1] == "pyproject.toml" else data
-          print(table.get("version", ""))
-          ' "$f")"
-            [ -n "$version" ] && break
-          done
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - if: steps.pedantry.outputs.version != ''
-        uses: astral-sh/setup-uv@v5
-
-      - name: pedantry check
-        if: steps.pedantry.outputs.version != ''
-        shell: bash
-        env:
-          PEDANTRY_VERSION: ${{ steps.pedantry.outputs.version }}
-        run: |
-          set -euo pipefail
-          uvx --from "git+https://github.com/dryan-org/pedantry@v${PEDANTRY_VERSION}" pedantry check --diff
-
       - name: Detect ecosystems
         id: d
         shell: bash
@@ -278,3 +248,37 @@ jobs:
           cargo test
           cargo install cargo-audit --locked >/dev/null 2>&1 || true
           cargo audit || echo "::warning::cargo audit reported issues (advisory)"
+
+      # ---------------- pedantry (last, after every language step) ----------------
+      - name: Find pedantry pin
+        id: pedantry
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=""
+          for f in pyproject.toml pedantry.toml; do
+            [ -f "$f" ] || continue
+            version="$(python3 -c '
+          import sys, tomllib
+          with open(sys.argv[1], "rb") as fh:
+              data = tomllib.load(fh)
+          table = data.get("tool", {}).get("pedantry", {}) if sys.argv[1] == "pyproject.toml" else data
+          print(table.get("version", ""))
+          ' "$f")"
+            [ -n "$version" ] && break
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - if: steps.pedantry.outputs.version != '' && steps.d.outputs.python != 'true'
+        uses: astral-sh/setup-uv@v5
+
+      - name: pedantry check
+        if: steps.pedantry.outputs.version != ''
+        shell: bash
+        env:
+          PEDANTRY_VERSION: ${{ steps.pedantry.outputs.version }}
+        run: |
+          set -euo pipefail
+          # system interpreter only: uvx would otherwise download the newest
+          # CPython, which the language steps above must not be able to see
+          uvx --python-preference only-system --from "git+https://github.com/dryan-org/pedantry@v${PEDANTRY_VERSION}" pedantry check --diff
