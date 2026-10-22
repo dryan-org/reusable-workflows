@@ -38,6 +38,19 @@ name: Dependency CI
 # input `secrets` (read one with fromJSON(inputs.secrets).NAME). Callers in
 # dryan-org can use `secrets: inherit` to hand over all of theirs.
 #
+# A pull request that changes only non-code files (docs, say) can skip the
+# build: list them as globs in non-code-paths. The skipped build job still
+# satisfies a required "ci / build" check (a job skipped by its condition
+# counts as passing, where a workflow skipped by a paths filter would leave the
+# check pending forever). A version-only bump of the root package.json (and
+# package-lock.json) counts as non-code too; a dependency change never does.
+# Pushes to the default branch always build.
+#
+#     with:
+#       non-code-paths: |
+#         **/*.md
+#         LICENSE
+#
 # For a private/scoped npm registry: commit an .npmrc with the registry
 # mapping(s) and an ${NPM_TOKEN} expansion (npm expands env vars in .npmrc
 # itself - see
@@ -51,6 +64,11 @@ on:
       node-version:
         type: string
         default: "lts/*"
+      non-code-paths:
+        # newline-separated globs (git pathspec glob syntax, so **/*.md
+        # matches at the root too); empty builds every pull request
+        type: string
+        default: ""
     secrets:
       ci_read_app_key:
         # private key of the read-only dryan-ci-read GitHub App; lets
@@ -71,7 +89,56 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    if: inputs.non-code-paths != '' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: diff
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          NON_CODE: ${{ inputs.non-code-paths }}
+        run: |
+          set -euo pipefail
+          specs=()
+          while IFS= read -r p; do
+            p="${p#"${p%%[![:space:]]*}"}"
+            p="${p%"${p##*[![:space:]]}"}"
+            if [ -n "$p" ]; then specs+=(":(exclude,glob)$p"); fi
+          done <<< "$NON_CODE"
+          code="$(git diff --name-only "$BASE...$HEAD" -- . "${specs[@]}")"
+          # A release PR: the root package.json and package-lock.json differ
+          # only in the package's own version. A dependency change still builds.
+          same() {
+            local merge filter="$2"
+            merge="$(git merge-base "$BASE" "$HEAD")"
+            [ "$(git show "$merge:$1" 2>/dev/null | jq -S "$filter")" = \
+              "$(git show "$HEAD:$1" 2>/dev/null | jq -S "$filter")" ]
+          }
+          if [ -n "$code" ] && [ -z "$(grep -vxE 'package(-lock)?\.json' <<< "$code")" ] &&
+            same package.json 'del(.version)' &&
+            same package-lock.json 'del(.version) | del(.packages[""].version)'; then
+            code=""
+          fi
+          if [ -n "$code" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Only non-code files changed; the build is skipped"
+          fi
+
   build:
+    # Builds unless the changes job found only non-code files (it is skipped,
+    # or fails, everywhere else, and then this builds)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     env:
       # make cargo fetch git deps with the git CLI so insteadOf rules apply
