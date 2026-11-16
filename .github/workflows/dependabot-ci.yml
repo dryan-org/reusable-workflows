@@ -246,8 +246,12 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node-version }}
-          # v5+ caches on its own when package.json names a package manager,
-          # and fails without a lockfile: keep v4's no-cache behaviour
+          # Cache ~/.npm (keyed on the lockfile hash) so npm ci stops
+          # re-downloading every tarball on every run: the private registries
+          # (Font Awesome Pro, GitHub Packages) bill by transfer. Needs a
+          # lockfile (setup-node fails without one), so repos without one
+          # install uncached, as before.
+          cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
           package-manager-cache: false
 
       - name: npm - install, build, test, audit
